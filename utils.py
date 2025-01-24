@@ -2,7 +2,7 @@
 Author: LiuyiYang 1183140624@qq.com
 Date: 2025-01-21 09:17:29
 LastEditors: LiuyiYang 1183140624@qq.com
-LastEditTime: 2025-01-22 16:05:44
+LastEditTime: 2025-01-24 17:03:43
 FilePath: "/CEUS/main/utils.py"
 '''
 import cv2
@@ -63,14 +63,14 @@ def plot_transform_para(start, end, win_len, transform_params_set, file_p,
     # plt.show()
 
 
-def plot_intensity(start, end, win_len, intensity_list, file_p):
+def plot_intensity(start, end, win_len, intensity_list, file_p, file_name='1'):
     plt.figure(figsize=(10, 6))
     plt.plot(range(start, end, win_len), intensity_list, linestyle='-', color='c')
     plt.title('CEUS Region Intensity Over Time')
     plt.xlabel('Frame')
     plt.ylabel('Intensity')
     plt.grid(True)
-    plt.savefig(os.path.join(file_p, 'intensity_plot.png'))
+    plt.savefig(os.path.join(file_p, f'intensity_plot_{file_name}.png'))
 
 
 
