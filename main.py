@@ -416,6 +416,7 @@ class Processor:
             # self.saved_video()
             print('thresholod {} done!'.format(threshold))
         print("All done!")
+        print("git test")
 
 if __name__ == "__main__":
     # 配置参数
