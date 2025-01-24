@@ -11,7 +11,7 @@ class Processor:
     def __init__(self, params):
         self.params = params
         self.root_p = self.params["root_p"]
-        self.ceus_pred_p = os.path.join(self.root_p, "ceus_pred")
+        self.ceus_pred_p = os.path.join(self.root_p, "kidney_pred")
         self.ceus_mode_p = os.path.join(self.root_p, "ceus_mode")
         self.threshold_p = os.path.join(root_p, "threshold-continual")
         self.file_name = self.params["file_name"]
@@ -236,23 +236,54 @@ class Processor:
         return filtered_res
 
 
-    def compute_ceus_region_intensity(self, ceus_img, mask_img):
+    def compute_ceus_region_intensity(self, ceus_img_path, mask_img_path):
         """
         计算CEUS区域的平均灰度值。
         """
-        ceus_image = cv2.imread(str(ceus_img), cv2.IMREAD_GRAYSCALE)
-        mask_image = cv2.imread(str(mask_img), cv2.IMREAD_GRAYSCALE)
+        intensity_list = None
+        for i in range(self.start, self.end, self.win_len):
+            ceus_img = Path(ceus_img_path) / f"{i}.png"
+            mask_img = Path(mask_img_path) / f"{i}.png"
+        
+            ceus_image = cv2.imread(str(ceus_img), cv2.IMREAD_GRAYSCALE)
+            mask_image = cv2.imread(str(mask_img), cv2.IMREAD_GRAYSCALE)
 
-        # Ensure mask is binary
-        mask_image[mask_image > 0] = 1
+            # Ensure mask is binary
+            mask_image[mask_image > 0] = 1
 
-        # Apply mask to CEUS image
-        masked_ceus = ceus_image * mask_image
+            # Apply mask to CEUS image
+            masked_ceus = ceus_image * mask_image
 
-        # Calculate the total intensity of the masked region
-        total_intensity = np.sum(masked_ceus[mask_image > 0])
+            # Calculate the total intensity of the masked region
+            total_intensity = np.sum(masked_ceus[mask_image > 0])
+            intensity_list.append(total_intensity)
 
-        return total_intensity
+        return intensity_list
+
+
+    def interval(self, intensity_list):
+        """
+        计算intensity_list的斜率。
+        """
+        intensity_list = [x / 1e6 for x in intensity_list]
+        window_size = 5
+        smoothed = np.convolve(intensity_list, np.ones(window_size)/window_size, mode='valid')
+        smoothed_intensity_list = np.concatenate((intensity_list[:window_size-1], smoothed))        
+
+        # 计算smoothed_intensity_list的斜率
+        slopes = np.diff(intensity_list)
+
+        print("Slopes:", slopes)
+        plot_intensity(self.start, self.end - 1, self.win_len, slopes, self.file_p, file_name="Slope of Smoothed Intensity")
+        plot_intensity(self.start, self.end, self.win_len, smoothed_intensity_list, self.file_p, file_name="Smoothed Intensity")
+        plot_intensity(self.start, self.end, self.win_len, intensity_list, self.file_p, file_name="")
+
+        # 计算斜率的峰值，用峰值前后10帧作为关键区间
+        max_slope_index = np.argmax(slopes)
+        key_interval_start = max(0, max_slope_index - 10)
+        key_interval_end = min(len(slopes), max_slope_index + 10)
+        print(f"Key interval: {key_interval_start} to {key_interval_end}")
+        return key_interval_start, key_interval_end
         
 
 
@@ -264,7 +295,10 @@ class Processor:
         stack_continual = None
         stack_registra_1frame, stack_registra_continual = None, None
         last_frame = 0
-        intensity_list = []
+        # 计算ceus kidney region的像素强度
+        intensity_list = self.compute_ceus_region_intensity(self.ceus_mode_p, self.ceus_pred_p)
+        # 获取关键区间
+        key_interval_start, key_interval_end = self.interval(intensity_list)
 
         transform_params_set = [[] for i in range(3)]
         for i in range(self.start, self.temp_end, self.win_len):
@@ -272,8 +306,7 @@ class Processor:
             fixed_image = sitk.ReadImage(fixed_p) 
 
             # 计算ceus kidney region的像素值
-            intensity = self.compute_ceus_region_intensity(fixed_p, f"{self.ceus_pred_p}\\{i}.png")
-            intensity_list.append(intensity)
+
             continue
 
             # 1. 阈值分割并保存 
@@ -370,8 +403,7 @@ class Processor:
             fixed_p = os.path.join(self.ceus_mode_p, f"{i}.png")
             fixed_image = sitk.ReadImage(fixed_p) 
             # 计算ceus kidney region的像素值
-            intensity = self.compute_ceus_region_intensity(fixed_p, f"{self.ceus_pred_p}\\{i}.png")
-            intensity_list.append(intensity)
+    
             continue
 
             if 'Kidney' in self.file_name or 'Ceus' in self.file_name:
@@ -403,9 +435,7 @@ class Processor:
         #                     transform_params_set, self.file_p, 
         #                     self.outlier_threshold, self.file_name
         #                     )
-        # 绘制intensity_list的折线图
-        plot_intensity(self.start, self.end, self.win_len, intensity_list, self.file_p)
-        
+        #         
         # self.saved_video()
 
 
@@ -416,18 +446,17 @@ class Processor:
             # self.saved_video()
             print('thresholod {} done!'.format(threshold))
         print("All done!")
-        print("git test")
 
 if __name__ == "__main__":
     # 配置参数
     # root_p = r"D:\\Vscode_code\\Python\\CEUS\\animal"
-    root_p = r"D:\Vscode_code\Python\CEUS\202404181825590031ABD\202404181825590031ABD"
+    root_p = r"D:\Vscode_code\Python\CEUS\animal"
 
     params = {
         "root_p": root_p,
         "file_name": "Ceus-outlier-scatter",
         "start": 0,
-        "end": 279,
+        "end": 140,
         "temp_end": int(140*0.5),
         "win_len": 1,
         "outlier_threshold": 5,
