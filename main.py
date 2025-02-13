@@ -206,10 +206,10 @@ class Processor:
     def saved_video(self):
         # 保存两个视频，第一个是单帧堆叠，第二个是连续帧堆叠
         # 1. 1-frame stacking
-        folder1_path = rf"{self.seg_no_registra_p}\no_stack"  # 替换为第一个文件夹的路径
-        folder2_path = rf"{self.seg_no_registra_p}\1_frame_stack"  # 替换为第二个文件夹的路径
-        folder3_path = rf"{self.seg_registra_p}\1_frame_stack"  # 替换为第三个文件夹的路径
-        background_image_path = rf"{self.ceus_mode_p}"  # 替换为背景图像的路径
+        folder1_path = rf"{self.seg_no_registra_p}\no_stack_scattered"  
+        folder2_path = rf"{self.seg_no_registra_p}\1_frame_stack"  
+        folder3_path = rf"{self.seg_registra_p}\1_frame_stack"
+        background_image_path = rf"{self.ceus_mode_p}"
         output_path = rf"{self.file_p}\1-frame-stack-video.mp4"  # 输出视频的路径
         create_video_from_images_with_background(folder1_path, folder2_path, folder3_path, 
                                                  background_image_path, output_path, 
@@ -240,7 +240,7 @@ class Processor:
         """
         计算CEUS区域的平均灰度值。
         """
-        intensity_list = None
+        intensity_list = []
         for i in range(self.start, self.end, self.win_len):
             ceus_img = Path(ceus_img_path) / f"{i}.png"
             mask_img = Path(mask_img_path) / f"{i}.png"
@@ -273,51 +273,56 @@ class Processor:
         # 计算smoothed_intensity_list的斜率
         slopes = np.diff(intensity_list)
 
-        print("Slopes:", slopes)
         plot_intensity(self.start, self.end - 1, self.win_len, slopes, self.file_p, file_name="Slope of Smoothed Intensity")
         plot_intensity(self.start, self.end, self.win_len, smoothed_intensity_list, self.file_p, file_name="Smoothed Intensity")
-        plot_intensity(self.start, self.end, self.win_len, intensity_list, self.file_p, file_name="")
+        plot_intensity(self.start, self.end, self.win_len, intensity_list, self.file_p, file_name="Intensity")
 
         # 计算斜率的峰值，用峰值前后10帧作为关键区间
         max_slope_index = np.argmax(slopes)
         key_interval_start = max(0, max_slope_index - 10)
         key_interval_end = min(len(slopes), max_slope_index + 10)
+        print(f"Max slope index: {max_slope_index}")
         print(f"Key interval: {key_interval_start} to {key_interval_end}")
         return key_interval_start, key_interval_end
         
-
 
     def process_threshold(self, threshold):
         print(f"Processing threshold: {threshold}")
         
         self.create_saved_directory(threshold)
+        return
         moving_1frame, moving_continual = None, None
         stack_continual = None
         stack_registra_1frame, stack_registra_continual = None, None
         last_frame = 0
+
         # 计算ceus kidney region的像素强度
         intensity_list = self.compute_ceus_region_intensity(self.ceus_mode_p, self.ceus_pred_p)
-        # 获取关键区间
+        # Get the key interval (process the segmentation first, then denoise the pixel intensity sequence, find inflection points, and then find the key interval)
         key_interval_start, key_interval_end = self.interval(intensity_list)
 
+        # 保存每次配准的变换参数（角度、X和Y）
         transform_params_set = [[] for i in range(3)]
         for i in range(self.start, self.temp_end, self.win_len):
             fixed_p = os.path.join(self.ceus_mode_p, f"{i}.png")
             fixed_image = sitk.ReadImage(fixed_p) 
 
-            # 计算ceus kidney region的像素值
-
-            continue
-
             # 1. 阈值分割并保存 
             res = self.seg_artery(rf"{self.ceus_mode_p}\\{i}.png", rf"{self.ceus_pred_p}\\{i}.png", 
-                                  dilate=(50, 50), threshold=threshold, morphology=(5, 5))
+                                threshold=threshold, morphology=(5, 5))
             cv2.imwrite(rf"{self.seg_no_registra_p}\\no_stack\\{i}.png", res)
+
             # 保留阈值结果连通域前5名的且面积大于阈值并保存
             if self.num_scatter > 0:
                 res_scattered = self.remove_scattered(res)
-                cv2.imwrite(rf"{self.seg_no_registra_p}\\no_stack_scattered\\{i}.png", res_scattered)
+                # Find contours and draw bounding boxes
                 stack_continual = res_scattered if stack_continual is None else stack_continual + res_scattered
+                res_scattered_bbox = res_scattered.copy()
+                contours, _ = cv2.findContours(res_scattered_bbox, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for contour in contours:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    cv2.rectangle(res_scattered_bbox, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                cv2.imwrite(rf"{self.seg_no_registra_p}\\no_stack_scattered\\{i}.png", res_scattered_bbox)
 
             if i == self.start:
                 moving_image = fixed_image
@@ -326,7 +331,6 @@ class Processor:
                 moving_1frame = sitk.GetImageFromArray(res_scattered)
                 moving_continual = sitk.GetImageFromArray(res_scattered)
                 continue
-
 
             # 检查图像是否为空或全黑
             if sitk.GetArrayFromImage(moving_1frame).sum() == 0:
@@ -343,6 +347,10 @@ class Processor:
             if sitk.GetArrayFromImage(moving_continual).sum() == 0:
                 print(f"Moving continual {i-1} is empty or all black!")
                 moving_continual = sitk.GetImageFromArray(res_scattered)
+                transform_params_set[0].append(0)
+                transform_params_set[1].append(0)
+                transform_params_set[2].append(0)
+                continue
 
             if res_scattered.sum() == 0:   
                 print(f"Fixed image {i} is empty or all black!")
@@ -397,14 +405,13 @@ class Processor:
                 # save last frame
                 last_frame = i
         
+        
         # 在temp_end到end之间，使用最后一帧的结果进行堆叠
         for i in range(self.temp_end, self.end, self.win_len):
             # 肾部配准
             fixed_p = os.path.join(self.ceus_mode_p, f"{i}.png")
             fixed_image = sitk.ReadImage(fixed_p) 
             # 计算ceus kidney region的像素值
-    
-            continue
 
             if 'Kidney' in self.file_name or 'Ceus' in self.file_name:
                 transform, registed_arr, transform_params = self.registration(fixed_image, moving_image)
@@ -421,6 +428,7 @@ class Processor:
                 cv2.imwrite(rf"{self.seg_no_registra_p}\continual_stack\{i}.png", stack_continual)
                 cv2.imwrite(rf"{self.seg_registra_p}\continual_stack\{i}.png", res_registra_continual)
                 shutil.copyfile(rf"{self.seg_no_registra_p}\no_stack\{last_frame}.png", rf"{self.seg_no_registra_p}\no_stack\{i}.png")
+                shutil.copyfile(rf"{self.seg_no_registra_p}\no_stack_scattered\{last_frame}.png", rf"{self.seg_no_registra_p}\no_stack_scattered\{i}.png")
 
                 stack_registra_1frame = res_registra_1frame
                 stack_registra_continual = res_registra_continual
@@ -431,40 +439,38 @@ class Processor:
         
         
         # 保存变换参数图
-        # plot_transform_para(self.start, self.end, self.win_len, 
-        #                     transform_params_set, self.file_p, 
-        #                     self.outlier_threshold, self.file_name
-        #                     )
-        #         
+        plot_transform_para(self.start, self.end, self.win_len, 
+                            transform_params_set, self.file_p, 
+                            self.outlier_threshold, self.file_name
+                            )
+                
         # self.saved_video()
 
 
     def run(self):
         for threshold in self.threshold_range:
             self.process_threshold(threshold)
-            # self.create_saved_directory(threshold)
-            # self.saved_video()
+            self.saved_video()
             print('thresholod {} done!'.format(threshold))
         print("All done!")
 
 if __name__ == "__main__":
     # 配置参数
-    # root_p = r"D:\\Vscode_code\\Python\\CEUS\\animal"
     root_p = r"D:\Vscode_code\Python\CEUS\animal"
 
     params = {
         "root_p": root_p,
         "file_name": "Ceus-outlier-scatter",
         "start": 0,
-        "end": 140,
+        "end": 140, 
         "temp_end": int(140*0.5),
         "win_len": 1,
         "outlier_threshold": 5,
-        "threshold_range": range(100, 111, 20),
+        "threshold_range": range(100, 101, 20),
         "registra_method": "rigid",
         "fps": 5,
         "num_scatter": 5,
-        "area_scatter": 200,
+        "area_scatter": 400,
     }
 
     processor = Processor(params)

@@ -2,7 +2,7 @@
 Author: LiuyiYang 1183140624@qq.com
 Date: 2025-01-21 09:17:29
 LastEditors: LiuyiYang 1183140624@qq.com
-LastEditTime: 2025-01-24 17:03:43
+LastEditTime: 2025-02-11 10:00:08
 FilePath: "/CEUS/main/utils.py"
 '''
 import cv2
@@ -73,13 +73,11 @@ def plot_intensity(start, end, win_len, intensity_list, file_p, file_name='1'):
     plt.savefig(os.path.join(file_p, f'intensity_plot_{file_name}.png'))
 
 
-
-# 将三个文件夹中的图片合并为一个视频，背景为ceus_mode
 def create_video_from_images_with_background(folder1, folder2, folder3, background_image_path, 
                                              output_video_path, fps=10, stack_method='1-frame'):
     """
+    # 将三个文件夹中的图片合并为一个视频，背景为ceus_mode
     从三个文件夹中读取同名图片，创建视频，每帧并排显示三个图像，并在每个子图片的背景添加一个固定的图像。
-
     Args:
         folder1: 第一个文件夹的路径。
         folder2: 第二个文件夹的路径。
@@ -90,6 +88,7 @@ def create_video_from_images_with_background(folder1, folder2, folder3, backgrou
     """
 
     # 获取所有图片文件名（假设三个文件夹中的文件名相同）
+    print("folder3: ", folder3)
     image_files = [f for f in os.listdir(folder3) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
     image_files.sort(key=lambda x: int(re.match(r'^(\d+)', x).group(1)))
 
