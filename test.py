@@ -2,7 +2,7 @@
 Author: LiuyiYang 1183140624@qq.com
 Date: 2025-02-13 10:17:41
 LastEditors: yangliuyi liuyi.yang@wuerzburg-dynamics.com
-LastEditTime: 2025-02-18 15:27:27
+LastEditTime: 2025-02-18 15:38:50
 FilePath: \CEUS\github-code\ceus\test.py
 Description: 尝试计算每一帧各个连通域的像素强度值
 '''
@@ -412,19 +412,16 @@ def process(b_mode_p, image_p, save_p, end_index=None):
     # cv2.imwrite(save_path, blank_image)
     # cv2.imshow('All Bounding Boxes', blank_image)
     # cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
 
 
 if __name__ == '__main__':    
-
+    # generate segmented images
     kidney_p = r"D:\Vscode_code\Python\CEUS\animal\kidney_pred"
     image_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\no_stack_scattered"
     save_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\separate_region_method"
     # process(kidney_p, image_p, save_p, end_index=int(140*0.5))
     
-
-
+    # generate video
     b_mode_p = r"D:\Vscode_code\Python\CEUS\animal\b_mode"
     fore_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\separate_region_method"
     back_p = r"D:\Vscode_code\Python\CEUS\animal\ceus_mode"
