@@ -1,8 +1,8 @@
 '''
 Author: LiuyiYang 1183140624@qq.com
 Date: 2025-02-13 10:17:41
-LastEditors: LiuyiYang 1183140624@qq.com
-LastEditTime: 2025-02-18 09:17:52
+LastEditors: yangliuyi liuyi.yang@wuerzburg-dynamics.com
+LastEditTime: 2025-02-18 15:27:27
 FilePath: \CEUS\github-code\ceus\test.py
 Description: 尝试计算每一帧各个连通域的像素强度值
 '''
@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import SimpleITK as sitk
 from utils import create_video_from_images_with_background
+import shutil
 
 
 
@@ -46,7 +47,7 @@ class BBoxList:
         self.bboxes = []
 
     def add_top_bbox(self, new_bbox):
-        top_bbox = bbox(x=new_bbox.x, y=new_bbox.y, w=new_bbox.w, h=new_bbox.h, frame=0, intensity=0, update_times=1)
+        top_bbox = bbox(x=new_bbox.x, y=new_bbox.y, w=new_bbox.w, h=new_bbox.h, frame=0, intensity=new_bbox.intensity, update_times=1)
         empty_list = [top_bbox, new_bbox]
         self.bboxes.append(empty_list)
 
@@ -165,7 +166,7 @@ def registra(moving_image, fixed_image):
     return final_transform
 
 
-def apply_transform(transform, image, output_p):
+def apply_transform(transform, image, output_p=None):
     # 将图像转换为标量图像
     if image.GetNumberOfComponentsPerPixel() > 1:
         image = sitk.VectorIndexSelectionCast(image, 0)
@@ -196,10 +197,10 @@ def apply_transform(transform, image, output_p):
     return sitk.GetArrayFromImage(resampled_image)
 
 
-def generate_video(image_p, ceus_mode_p, save_p):
+def generate_video(image_p, ceus_mode_p, save_p, name='ouput_video1'):
     image_files = sorted(os.listdir(image_p), key=lambda x: int(x.split('_')[-1].split('.')[0]))
     height, width = cv2.imread(os.path.join(image_p, image_files[0])).shape[:2]
-    video_path = os.path.join(save_p, 'output_video1.avi')
+    video_path = os.path.join(save_p, f'{name}.avi')
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     video = cv2.VideoWriter(video_path, fourcc, 5, (width, height))
 
@@ -215,11 +216,10 @@ def generate_video(image_p, ceus_mode_p, save_p):
     print(f"Video saved to {video_path}")
 
 
-def generate_video_with_two_images(image_p1, image_p2, fore_p, save_p):
+def generate_video_with_two_images(image_p1, image_p2, fore_p, save_p, name='output_video2'):
     image_files1 = sorted(os.listdir(image_p1), key=lambda x: int(x.split('_')[-1].split('.')[0]))
     image_files2 = sorted(os.listdir(image_p2), key=lambda x: int(x.split('_')[-1].split('.')[0]))
     fore_files = sorted(os.listdir(fore_p), key=lambda x: int(x.split('_')[-1].split('.')[0]))
-
 
     height1, width1 = cv2.imread(os.path.join(image_p1, image_files1[0])).shape[:2]
     height2, width2 = cv2.imread(os.path.join(image_p2, image_files2[0])).shape[:2]
@@ -231,19 +231,17 @@ def generate_video_with_two_images(image_p1, image_p2, fore_p, save_p):
     combined_height = height1
     combined_width = width1 + width2
 
-    video_path = os.path.join(save_p, 'output_video2.avi')
+    video_path = os.path.join(save_p, f'{name}.avi')
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     video = cv2.VideoWriter(video_path, fourcc, 5, (combined_width, combined_height))
+    
+    for f in fore_files:
+        frame_number = int(f.split('_')[-1].split('.')[0])
+        img_path1 = os.path.join(image_p1, f"{frame_number}.png")
+        img_path2 = os.path.join(image_p2, f"{frame_number}.png")
+        fore_path = os.path.join(fore_p, f)
 
-    for img_file1, img_file2, fore_file in zip(image_files1, image_files2, fore_files):
-        img_path1 = os.path.join(image_p1, img_file1)
-        img_path2 = os.path.join(image_p2, img_file2)
-        fore_path = os.path.join(fore_p, fore_file)
-
-        img1 = cv2.imread(img_path1)
-        img2 = cv2.imread(img_path2)
         fore_img = cv2.imread(fore_path, cv2.IMREAD_GRAYSCALE)
-
         left = stack_images(fore_img, img_path1)
         right = stack_images(fore_img, img_path2)
         combine = np.hstack((left, right))
@@ -254,11 +252,13 @@ def generate_video_with_two_images(image_p1, image_p2, fore_p, save_p):
     print(f"Video saved to {video_path}")
 
 
-def process(b_mode_p, image_p, save_p):
-    image_files = sorted(os.listdir(image_p), key=lambda x: int(os.path.splitext(x)[0]))
+def process(b_mode_p, image_p, save_p, end_index=None):
     bbox_list = BBoxList()
-    continual_img = None
+    image_files = sorted(os.listdir(image_p), key=lambda x: int(os.path.splitext(x)[0]))
     
+    seg_continual_img = None
+    reg_continual_img = None
+
     for i, img in enumerate(image_files):
         img_name = os.path.splitext(img)[0]
         img_path = os.path.join(image_p, img)
@@ -268,15 +268,24 @@ def process(b_mode_p, image_p, save_p):
         # If the image is blank, skip to the next image
         if cv2.countNonZero(img) == 0:
             continue
-
+        
+        seg_full_image = np.zeros_like(img)
+        reg_full_image = np.zeros_like(img)
+        if i > end_index:
+            shutil.copyfile(os.path.join(save_p, 'origin', f"{end_index}.png"), os.path.join(save_p, "origin", f'{img_name}.png'))
+            shutil.copyfile(os.path.join(save_p, 'continual', f"{end_index}.png"), os.path.join(save_p, "continual", f'{img_name}.png'))
+            transform = registra(sitk.ReadImage(rf"{b_mode_p}\{end_index}.png"),
+                                 sitk.ReadImage(rf"{b_mode_p}\{img_name}.png"))
+            registra_img = apply_transform(transform, sitk.GetImageFromArray(seg_continual_img))
+            cv2.imwrite(os.path.join(save_p, "registra_continual", f'{img_name}.png'), registra_img)            
+            continue
+        
         # Find contours in the image
         contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
         # Loop over the contours
         for contour in contours:
             # Get the bounding box for each contour
             x, y, w, h = cv2.boundingRect(contour)
-
             # Check for overlap with existing bounding boxes
             overlap_found = False
 
@@ -305,6 +314,8 @@ def process(b_mode_p, image_p, save_p):
                         new_bbox = bbox(min(x, x1), min(y, y1), max(x + w, x1 + w1) - min(x, x1), max(y + h, y1 + h1) - min(y, y1),
                                         img_name, np.sum(img[y:y+h, x:x+w]) / 255, b.update_times + 1)
                         b.update_times += 1
+                        b.x, b.y, b.w, b.h = new_bbox.x, new_bbox.y, new_bbox.w, new_bbox.h
+                        b.intensity = np.sum(img[y:y+h, x:x+w]) / 255
                         bbox_list.bboxes[idx].append(new_bbox)
                     break
 
@@ -316,6 +327,7 @@ def process(b_mode_p, image_p, save_p):
                 new_bbox.set_update_times(1)
                 bbox_list.add_top_bbox(new_bbox)
     
+
         # Find the top X bboxes with the longest update_times
         if len(bbox_list.get_bboxes()) > 5:
             top_bboxes = sorted(bbox_list.get_bboxes(), key=lambda b: b[0].update_times, reverse=True)[:5]
@@ -325,16 +337,13 @@ def process(b_mode_p, image_p, save_p):
         top_frames_intensities = [(bbox_list.extract_frame_numbers(b)) for b in top_bboxes]
 
         # Plot the frame numbers and intensities
-        blank_image = np.zeros_like(img)
         # plt.figure(figsize=(10, 6))
         transform = None
         for i, (frames, intensities) in enumerate(top_frames_intensities):
             # plt.plot(frames, intensities, label=f'Top {i+1} bbox')
 
             # Calculate the slopes between consecutive points with a fixed distance of 1
-            
             slopes = np.diff(intensities[1:])
-            
             # Find the index of the maximum positive slope
             max_slope_index = 1
             if len(slopes) < 1:
@@ -351,25 +360,17 @@ def process(b_mode_p, image_p, save_p):
             # plt.scatter(frames[max_slope_index + 1], intensities[max_slope_index + 1], color='red')
 
             temp = top_bboxes[i][max_slope_index]
-
             if temp.intensity < 400:
                 continue
 
             # 把Top连通区域的关键帧截出来
             img = cv2.imread(rf"{image_p}\{temp.frame}.png")
             x, y, w, h = temp.x, temp.y, temp.w, temp.h
-            # img_with_bbox = cv2.rectangle(
-            # img.copy(), (x, y), (x + w, y + h), (225, 100, 50), 1
-            # )
-            # save_path = os.path.join(save_p, f'bbox_{x}_{y}_{w}_{h}_{temp.frame}.png')
-            # cv2.imwrite(save_path, img_with_bbox)
 
             # Get the cropped region
-            cropped_region = img[y:y+h, x:x+w]
             blank_image_with_cropped = np.zeros_like(img)
-            blank_image_with_cropped[y:y+h, x:x+w] = cropped_region
-            # blank_cropped_save_path = os.path.join(save_p, f'cropped_{x}_{y}_{w}_{h}_{temp.frame}.png')
-            # cv2.imwrite(blank_cropped_save_path, blank_image_with_cropped)
+            blank_image_with_cropped[y:y+h, x:x+w] = img[y:y+h, x:x+w]
+            seg_full_image[y:y+h, x:x+w] = cv2.cvtColor(img[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
 
             # registra
             b_mode_moving_img = sitk.ReadImage(rf"{b_mode_p}\{temp.frame}.png") 
@@ -378,29 +379,22 @@ def process(b_mode_p, image_p, save_p):
             transform = registra(b_mode_moving_img, b_mode_fixed_img)
             
             # Apply the transform to the cropped region
-            crop_img = sitk.GetImageFromArray(blank_image_with_cropped[:, :, 0])
-            registra_img = apply_transform(transform, crop_img, f"{save_p}/registra_{x}_{y}_{w}_{h}_{temp.frame}.png")
+            blank_image_with_cropped = sitk.GetImageFromArray(blank_image_with_cropped[:, :, 0])
+            registra_img = apply_transform(transform, blank_image_with_cropped, f"{save_p}/registra_{x}_{y}_{w}_{h}_{temp.frame}.png")
+            reg_full_image[registra_img > 0] = registra_img[registra_img > 0]
 
-            # get the bbox of the registra image
-            registra_bbox = cv2.boundingRect(registra_img)
-            x, y, w, h = registra_bbox
-            for k in range(blank_image.shape[0]):
-                for j in range(blank_image.shape[1]):
-                    if blank_image[k, j] == 0 and k >= y and k <= y+h and j >= x and j <= x+w:
-                        blank_image[k, j] = registra_img[k][j]  # Assign only the first channel value
-
-            # continual img
-            continual_img = blank_image if continual_img is None else continual_img + blank_image
-            # registra continual img
-            registra_continual_img = apply_transform(transform, sitk.GetImageFromArray(continual_img), f"{save_p}/registra_continual_{img_name}.png")
-            # save
-            cv2.imwrite(os.path.join(save_p, "continual", f'{img_name}.png'), continual_img)
-            cv2.imwrite(os.path.join(save_p, "registra_continual", f'{img_name}.png'), registra_continual_img)
-
-        save_path = os.path.join(save_p, "origin", f'{img_name}.png')
-        cv2.imwrite(save_path, blank_image)
+        
+        # continual img
+        seg_continual_img = seg_full_image if seg_continual_img is None else seg_continual_img + seg_full_image
+        # registra continual img
+        reg_continual_img = reg_full_image if reg_continual_img is None else reg_continual_img + reg_full_image
+        # save
+        cv2.imwrite(os.path.join(save_p, "continual", f'{img_name}.png'), seg_continual_img)
+        cv2.imwrite(os.path.join(save_p, "registra_continual", f'{img_name}.png'), reg_continual_img)
+        cv2.imwrite(os.path.join(save_p, "origin", f'{img_name}.png'), seg_full_image)
         print(f"Processed frame {img_name}")
         print('--'*10)
+
 
     # 打印列表中的所有 bbox 实例
     # bbox_list.print_bboxes()
@@ -419,25 +413,28 @@ def process(b_mode_p, image_p, save_p):
     # cv2.imshow('All Bounding Boxes', blank_image)
     # cv2.waitKey(0)
     cv2.destroyAllWindows()
-    return blank_image
 
-
-def main():
-    b_mode_p = r"D:\Vscode_code\Python\CEUS\animal\kidney_pred"
-    image_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\no_stack_scattered"
-    save_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\separate_region_method"
-    img = process(b_mode_p, image_p, save_p)
 
 
 if __name__ == '__main__':    
-    # main()
+
+    kidney_p = r"D:\Vscode_code\Python\CEUS\animal\kidney_pred"
+    image_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\no_stack_scattered"
+    save_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\separate_region_method"
+    # process(kidney_p, image_p, save_p, end_index=int(140*0.5))
     
+
+
     b_mode_p = r"D:\Vscode_code\Python\CEUS\animal\b_mode"
     fore_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\separate_region_method"
     back_p = r"D:\Vscode_code\Python\CEUS\animal\ceus_mode"
     save_p = r"D:\Vscode_code\Python\CEUS\animal\threshold-continual\threshold_100\Ceus-outlier-scatter\seg_no_registra\output_video"
-    # generate_video(fore_p, back_p, save_p)
-    # generate_video_with_two_images(back_p, b_mode_p, fore_p, save_p)
-
-    create_video_from_images_with_background(os.path.join(fore_p, "origin"), os.path.join(fore_p, "continual"), os.path.join(fore_p, "registra_continual"), back_p, os.path.join(save_p, "output_video3.avi"), fps=5, stack_method='continual')
+    generate_video(os.path.join(fore_p, "origin"), back_p, save_p, name='output_video1')
+    generate_video_with_two_images(back_p, b_mode_p, os.path.join(fore_p, "origin"), save_p, name='output_video2')
+    create_video_from_images_with_background(os.path.join(fore_p, "origin"), 
+                                             os.path.join(fore_p, "continual"), 
+                                             os.path.join(fore_p, "registra_continual"), 
+                                             back_p, 
+                                             os.path.join(save_p, "output_video3.avi"), 
+                                             fps=5, stack_method='continual')
     print("Done")
