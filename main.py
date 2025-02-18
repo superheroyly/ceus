@@ -290,16 +290,16 @@ class Processor:
         print(f"Processing threshold: {threshold}")
         
         self.create_saved_directory(threshold)
-        return
+    
         moving_1frame, moving_continual = None, None
         stack_continual = None
         stack_registra_1frame, stack_registra_continual = None, None
         last_frame = 0
 
         # 计算ceus kidney region的像素强度
-        intensity_list = self.compute_ceus_region_intensity(self.ceus_mode_p, self.ceus_pred_p)
+        # intensity_list = self.compute_ceus_region_intensity(self.ceus_mode_p, self.ceus_pred_p)
         # Get the key interval (process the segmentation first, then denoise the pixel intensity sequence, find inflection points, and then find the key interval)
-        key_interval_start, key_interval_end = self.interval(intensity_list)
+        # key_interval_start, key_interval_end = self.interval(intensity_list)
 
         # 保存每次配准的变换参数（角度、X和Y）
         transform_params_set = [[] for i in range(3)]
@@ -321,7 +321,7 @@ class Processor:
                 contours, _ = cv2.findContours(res_scattered_bbox, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 for contour in contours:
                     x, y, w, h = cv2.boundingRect(contour)
-                    cv2.rectangle(res_scattered_bbox, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                    # cv2.rectangle(res_scattered_bbox, (x, y), (x + w, y + h), (255, 0, 0), 2)
                 cv2.imwrite(rf"{self.seg_no_registra_p}\\no_stack_scattered\\{i}.png", res_scattered_bbox)
 
             if i == self.start:
@@ -463,7 +463,7 @@ if __name__ == "__main__":
         "file_name": "Ceus-outlier-scatter",
         "start": 0,
         "end": 140, 
-        "temp_end": int(140*0.5),
+        "temp_end": int(140*1),
         "win_len": 1,
         "outlier_threshold": 5,
         "threshold_range": range(100, 101, 20),
