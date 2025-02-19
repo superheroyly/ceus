@@ -1,0 +1,14 @@
+# 忽略所有 .log 文件 
+*.log
+
+# 忽略 IDE 配置文件（如 VS Code、IntelliJ）
+.vscode/
+.idea/
+
+# 忽略编译产物 
+dist/
+build/
+*.exe
+
+# 例外：强制包含某个文件（即使其他规则忽略）
+!src/config.ini
